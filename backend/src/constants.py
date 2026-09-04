@@ -1,0 +1,30 @@
+USER_ROLES = (
+    "DISPATCHER",
+    "RESOURCE_OPERATOR",
+)
+
+INCIDENT_STATUSES = (
+    "CREATED",
+    "PENDING",
+    "ALLOCATED",
+    "IN_PROGRESS",
+    "RESOLVED",
+)
+
+AMBULANCE_STATUSES = (
+    "AVAILABLE",
+    "BUSY",
+    "OFFLINE",
+)
+
+HOSPITAL_STATUSES = (
+    "ACTIVE",
+    "INACTIVE",
+)
+
+INCIDENT_SEVERITIES = (
+    "LOW",
+    "MEDIUM",
+    "HIGH",
+    "CRITICAL",
+)
