@@ -46,3 +46,5 @@ backend/*.zip
 
 # Local test and development artifacts
 backend/__pycache__/
+
+presentation/
