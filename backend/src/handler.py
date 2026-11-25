@@ -77,7 +77,7 @@ def get_user_service():
 
 
 def get_allocation_service():
-    from config.dynamodb import get_table
+    from config.dynamodb import get_dynamodb_client, get_table
 
     incident_table = get_table("EmergencyIncidents")
     ambulance_table = get_table("EmergencyAmbulances")
@@ -87,7 +87,7 @@ def get_allocation_service():
     ambulance_repository = AmbulanceRepository(ambulance_table)
     hospital_repository = HospitalRepository(hospital_table)
 
-    transaction_client = incident_table.meta.client
+    transaction_client = get_dynamodb_client()
 
     return AllocationService(
         incident_repository,
@@ -98,7 +98,7 @@ def get_allocation_service():
 
 
 def get_coordination_service():
-    from config.dynamodb import get_table
+    from config.dynamodb import get_dynamodb_client, get_table
 
     incident_table = get_table("EmergencyIncidents")
     ambulance_table = get_table("EmergencyAmbulances")
@@ -108,7 +108,7 @@ def get_coordination_service():
     ambulance_repository = AmbulanceRepository(ambulance_table)
     hospital_repository = HospitalRepository(hospital_table)
 
-    transaction_client = incident_table.meta.client
+    transaction_client = get_dynamodb_client()
 
     return CoordinationService(
         incident_repository,

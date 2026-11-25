@@ -247,10 +247,70 @@ def test_stale_candidate_and_invalid_incident():
     print("Concurrency D & E (stale BUSY ambulance & cancelled incident): PASSED")
 
 
+def test_boto3_transact_write_wire_format():
+    """
+    Regression test: ensure real boto3.client('dynamodb') (from get_dynamodb_client)
+    sends low-level AttributeValue keys {'S': ...} without ServiceResource
+    TransformationInjector double-serialization ({'M': {'S': {'S': ...}}}).
+    """
+    import boto3
+    from unittest.mock import MagicMock
+    from services.coordination_service import CoordinationService
+
+    client = boto3.client("dynamodb", region_name="ap-south-1")
+    captured = {}
+
+    def fake_make_request(operation_model, request_dict):
+        captured["body"] = json.loads(request_dict["body"].decode("utf-8"))
+        resp = MagicMock()
+        resp.status_code = 200
+        return (resp, {})
+
+    client._endpoint.make_request = fake_make_request
+
+    inc_repo = MagicMock()
+    inc_repo.get_by_id.return_value = {
+        "incidentId": "INC-WIRE-1",
+        "status": "VERIFIED",
+        "assignedAmbulanceId": None,
+        "requiredEquipment": ["OXYGEN", "TRAUMA_KIT"],
+        "latitude": 18.52,
+        "longitude": 73.85,
+    }
+    amb_repo = MagicMock()
+    amb_repo.get_by_id.return_value = {
+        "ambulanceId": "AMB-WIRE-1",
+        "registrationNumber": "MH12WIRE01",
+        "status": "AVAILABLE",
+        "assignedIncidentId": None,
+        "equipment": ["OXYGEN", "TRAUMA_KIT", "DEFIBRILLATOR"],
+        "latitude": 18.53,
+        "longitude": 73.86,
+    }
+    hosp_repo = MagicMock()
+
+    svc = CoordinationService(inc_repo, amb_repo, hosp_repo, transaction_client=client)
+    svc.assign_ambulance("INC-WIRE-1", "AMB-WIRE-1")
+
+    tx_items = captured["body"]["TransactItems"]
+    assert len(tx_items) == 2
+    assert tx_items[0]["Update"]["TableName"] == "EmergencyAmbulances"
+    assert tx_items[0]["Update"]["Key"] == {"ambulanceId": {"S": "AMB-WIRE-1"}}
+    assert tx_items[0]["Update"]["ExpressionAttributeValues"][":busy"] == {"S": "BUSY"}
+    assert tx_items[0]["Update"]["ExpressionAttributeValues"][":nullVal"] == {"NULL": True}
+    assert tx_items[1]["Update"]["TableName"] == "EmergencyIncidents"
+    assert tx_items[1]["Update"]["Key"] == {"incidentId": {"S": "INC-WIRE-1"}}
+    assert tx_items[1]["Update"]["ExpressionAttributeValues"][":assigned"] == {
+        "S": "AMBULANCE_ASSIGNED"
+    }
+    print("Boto3 TransactWriteItems wire-format regression check: PASSED")
+
+
 if __name__ == "__main__":
     test_suitability_and_validation()
     test_concurrent_two_incidents_same_ambulance()
     test_concurrent_two_ambulances_same_incident()
     test_concurrent_duplicate_same_request()
     test_stale_candidate_and_invalid_incident()
+    test_boto3_transact_write_wire_format()
     print("\nALL STAGE 3 AMBULANCE SUITABILITY & CONCURRENCY TESTS PASSED")

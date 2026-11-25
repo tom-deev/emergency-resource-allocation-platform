@@ -368,6 +368,9 @@ def seed_demo_data():
 def install_in_memory_backend():
     tables = create_in_memory_store()
     dynamodb_config.get_table = lambda table_name: tables[table_name]
+    dynamodb_config.get_dynamodb_client = (
+        lambda: tables["EmergencyIncidents"].meta.client
+    )
     return tables
 
 
