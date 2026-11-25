@@ -1589,3 +1589,42 @@ The Major architecture is a planned evolution.
 It should be implemented only after the Minor system is working and verified.
 
 End of Architecture Specification
+
+
+---
+
+43. Final Implemented Minor Project Architecture (2026-11-25)
+
+This section documents the exact implemented components in the repository as of 2026-11-25.
+
+43.1 Implemented Stack
+
+- Frontend: React 19 + Vite (`frontend/src/`) with Leaflet (`^1.9.4`), React Leaflet (`^5.0.0`), and OpenStreetMap tiles (no paid map API keys).
+- External Navigation: Google Maps Directions URLs (`https://www.google.com/maps/dir/?api=1&destination=LAT,LNG&travelmode=driving`) for both incident and confirmed hospital destinations (explicitly external; no live GPS tracking).
+- Backend Runtime: Single Python AWS Lambda handler (`backend/src/handler.py` → `lambda_handler`) compatible with both API Gateway REST API (v1) and HTTP API (v2) event formats, with built-in CORS headers and `OPTIONS` preflight support.
+- Authentication Layer: `backend/src/utils/auth.py` — stdlib HMAC-SHA256 signed Bearer tokens with expiry, environment-variable signing secret (`AUTH_TOKEN_SECRET`), and route-level RBAC for `DISPATCHER` and `RESOURCE_OPERATOR`.
+- Business Logic & Services (`backend/src/services/`):
+  - `incident_service.py`: Creation, deterministic P1–P4 priority queue sorting & IST date filtering, overdue threshold calculation, conditional `start_review` and `verify_incident`.
+  - `coordination_service.py`: Haversine candidate evaluation (`get_candidates`), atomic 2-item ambulance dispatch (`assign_ambulance`), atomic multi-bed hospital reservation (`request_hospital`), admission decision (`record_hospital_decision`), duplicate-safe reservation cancellation (`cancel_hospital_reservation`), transport (`mark_patient_transported`), atomic completion + ambulance release (`complete_incident`), and live dashboard aggregation (`get_dashboard_summary`).
+  - `ambulance_service.py`, `hospital_service.py`, `user_service.py`: Validated CRUD and capacity/coordinate checks.
+  - `allocation_service.py` + `allocation/engine.py`: Haversine distance & suitability helpers (reused by `CoordinationService`) plus legacy `POST /incidents/{id}/allocate` retained for backward compatibility only (not exposed in UI).
+- Data Layer (`backend/src/repositories/` + `backend/src/config/dynamodb.py`): Four DynamoDB tables (`EmergencyUsers`, `EmergencyIncidents`, `EmergencyAmbulances`, `EmergencyHospitals`). Bed reservations (`bedReservation`) and bounded history (`reservationHistory`, max 20 entries) are embedded in `EmergencyIncidents` so no 5th table is required.
+
+43.2 Local Testing & Load Testing Architecture
+
+- Local Development Bridge (`backend/local_server.py`): Multi-threaded stdlib `ThreadingHTTPServer` (`http://127.0.0.1:8000`) wrapping `handler.lambda_handler` with a thread-safe in-memory mock DynamoDB (`InMemoryTable` + `InMemoryDynamoClient` supporting `ConditionExpression` and atomic `transact_write_items`). Used strictly for local verification and demonstration; does not replace AWS DynamoDB.
+- Load Testing (`backend/load_tests/`): Isolated Locust (`2.47.0`, dev-only) suite (`locustfile.py`, `config.example.env`, `README.md`, `PERFORMANCE_REPORT.md`) with separate `DispatcherUser` and `ResourceOperatorUser` profiles and safe read-only default mode. Benchmarks recorded on `local_server.py` (10 to 200 concurrent users) are local mock-server measurements only and do not establish AWS capacity.
+
+43.3 Deployment Verification Status
+
+- Local backend (24/24 test suites), frontend (`npm run lint`, `npm run build`), local HTTP smoke tests, and local Locust benchmarks are verified.
+- Live AWS deployment (DynamoDB tables, Lambda `EmergencyResponseBackend`, API Gateway routes/CORS in `ap-south-1`) has **not** yet been verified.
+
+
+43.4 Stage 8 Security, OTP & Archiving Architecture Additions (2026-11-25)
+
+- **Token Purpose Separation (`backend/src/utils/auth.py`)**: Explicit `purpose` claim (`ACCESS` vs `OTP_CHALLENGE`). Operational endpoints accept only `ACCESS` tokens; `POST /auth/verify-otp` accepts only `OTP_CHALLENGE` tokens.
+- **OTP Persistence (`EmergencyUsers`)**: Stored directly on the user's DynamoDB item (`otpChallengeId`, `otpHash`, `otpExpiresAt`, `otpAttempts`, `otpMaxAttempts`, `otpUsed`) with conditional atomic consumption (`consume_otp_challenge`) — no 5th DynamoDB table.
+- **Incident Ownership & Archiving (`EmergencyIncidents`)**: Added `createdBy`, `createdByUsername`, `isArchived`, `archivedAt`, `archivedBy` directly on the incident item, enforced by backend handler ownership filtering, response sanitization for Dispatchers, and conditional archive updates (`archive_conditional_update`).
+- **Role-Isolated Frontend (`frontend/src/App.jsx`)**: Dispatchers see only **My Reported Incidents** and never query operator-only endpoints; Resource Operators see **Dashboard**, **Priority Queue**, **Incidents**, **Resource Coordination**, **Ambulances**, **Hospitals**, and **Archived Incidents** (`ArchivedIncidentsView.jsx`).
+- **Verification**: 27/27 backend test suites pass locally (mock/in-memory DynamoDB). Live AWS deployment remains pending Phase 5.

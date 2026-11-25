@@ -1,6 +1,16 @@
 import json
 
 import handler
+from utils.auth import create_token
+
+
+OPERATOR_HEADERS = {
+    "Authorization": "Bearer " + create_token({
+        "userId": "OP001",
+        "username": "operator1",
+        "role": "RESOURCE_OPERATOR",
+    })
+}
 
 
 class FakeHospitalService:
@@ -51,6 +61,7 @@ handler.get_hospital_service = fake_get_hospital_service
 event = {
     "httpMethod": "POST",
     "path": "/hospitals",
+    "headers": OPERATOR_HEADERS,
     "body": json.dumps({
         "name": "City General Hospital",
         "latitude": 16.8524,
@@ -80,6 +91,7 @@ print("POST /hospitals: PASSED")
 event = {
     "httpMethod": "GET",
     "path": "/hospitals",
+    "headers": OPERATOR_HEADERS,
 }
 
 response = handler.lambda_handler(event, None)
@@ -98,6 +110,7 @@ print("GET /hospitals: PASSED")
 event = {
     "httpMethod": "PUT",
     "path": "/hospitals/HOS001",
+    "headers": OPERATOR_HEADERS,
     "body": json.dumps({
         "availableBeds": 35,
     }),
@@ -119,6 +132,7 @@ print("PUT /hospitals/{id}: PASSED")
 event = {
     "httpMethod": "PUT",
     "path": "/hospitals/HOS001",
+    "headers": OPERATOR_HEADERS,
     "body": json.dumps({
         "status": "INACTIVE",
     }),

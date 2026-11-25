@@ -1807,3 +1807,43 @@ The Major extends that foundation with more advanced cloud-native, event-driven,
 The project should remain technically meaningful rather than becoming a collection of AWS services added only for appearance.
 
 End of Project Master Specification — Final Baseline
+
+
+---
+
+36. Final Implemented Minor Project Reconciliation (2026-11-25)
+
+This section reconciles the earlier planning baseline above with the final implemented Minor Project. Historical planning sections (such as automatic allocation) are preserved above for traceability and future Major Project reference.
+
+36.1 Reconciled Human-Controlled Workflow
+
+The implemented Minor Project uses a strict human-controlled workflow rather than silent automatic resource allocation:
+
+1. DISPATCHER registers an emergency incident (interactive Leaflet/OpenStreetMap click, draggable marker, Browser Geolocation API, or manual lat/lng entry).
+2. Backend generates authoritative UTC ISO-8601 timestamps (`createdAt`, `updatedAt`) and derives priority (`CRITICAL→P1`, `HIGH→P2`, `MEDIUM→P3`, `LOW→P4`), ignoring client-supplied timestamps or priority.
+3. Priority Queue orders incidents deterministically by priority (`P1 → P4`), then oldest `createdAt` first; UI displays `Asia/Kolkata` (IST) times, elapsed waiting time, and configurable waiting-threshold alerts (`P1: 5m, P2: 15m, P3: 30m, P4: 60m`).
+4. RESOURCE_OPERATOR inspects the incident, starts review (`UNDER_REVIEW`), and verifies (`VERIFIED`, setting `verifiedAt`) or rejects (`REJECTED`) with remarks.
+5. RESOURCE_OPERATOR views Haversine-ranked suitable ambulance candidates and manually assigns an available, equipment-compatible, unassigned ambulance atomically (`AMBULANCE_ASSIGNED`, setting `ambulanceAssignedAt`, marking ambulance `BUSY`).
+6. External Google Maps driving directions ("Navigate to Incident") become available using the incident's actual stored coordinates (no live GPS tracking).
+7. RESOURCE_OPERATOR selects an ACTIVE hospital and atomically reserves beds (`default = peopleAffected`, adjustable positive integer), decrementing `availableBeds`, creating an embedded `bedReservation` (`RESERVED`) inside the `EmergencyIncidents` item, and setting `HOSPITAL_REQUESTED`.
+8. RESOURCE_OPERATOR records hospital acceptance (`HOSPITAL_ACCEPTED`, `hospitalAcceptedAt`, reservation `CONFIRMED` without a second decrement, unlocking "Navigate to Hospital" via Google Maps using actual stored hospital coordinates), rejection (`HOSPITAL_REJECTED`, atomically releasing reserved beds once), or cancellation (`RELEASED`, atomically returning beds and moving back to `AMBULANCE_ASSIGNED` without releasing the ambulance).
+9. Reservation history is stored in `reservationHistory` on the incident item and bounded to the 20 most recent entries (`MAX_RESERVATION_HISTORY = 20`) to avoid DynamoDB's 400 KB item limit.
+10. RESOURCE_OPERATOR records patient transport (`PATIENT_TRANSPORTED`, `transportedAt`) and completes the incident (`COMPLETED`, `completedAt`), atomically releasing the ambulance back to `AVAILABLE` (`assignedIncidentId = None`) while keeping the confirmed hospital reservation and bed count intact.
+
+36.2 Reconciled Two-Role Model
+
+- DISPATCHER: Incident registration, priority queue viewing, incident detail/history viewing, and read-only monitoring of Dashboard, Ambulances, Hospitals, and Maps.
+- RESOURCE_OPERATOR: Complete emergency response coordination (inspection, review, verification/rejection, ambulance dispatch, hospital bed reservation/decision/cancellation, transport, completion) plus ambulance and hospital CRUD management.
+
+36.3 Implemented Security & Prototype Limitations
+
+- Authentication uses basic username + SHA-256 password hashing (academic prototype; not production-grade bcrypt/Cognito) with lightweight HMAC-SHA256 signed Bearer tokens (`AUTH_TOKEN_SECRET` env var, 8-hour expiry) and backend route-level role enforcement (`401`/`403`).
+- Local development uses `backend/local_server.py` (in-memory mock DynamoDB). Live AWS Lambda / API Gateway / DynamoDB deployment in `ap-south-1` has not yet been verified.
+- Major Project items (EventBridge, SQS, DLQ, Step Functions, SNS, Cognito, S3/Glue/Athena analytics, live GPS tracking) remain intentionally out of scope for the Minor submission.
+
+
+36.4 Stage 8 Security, Ownership, Operator OTP & Archiving Update (2026-11-25)
+
+- **Dispatcher Ownership & Privacy (Stage 8B)**: Every new incident stamps `createdBy` (`userId`) and `createdByUsername` from verified token claims (ignoring client-supplied values). Dispatchers can view only their own incidents (sanitized to basic fields + `isArchived`), receive `404` on other users' or legacy incidents without `createdBy`, and receive `403` on `/incidents/queue`, `/dashboard/summary`, `/ambulances`, `/hospitals`, and `/incidents/archived`.
+- **Resource Operator Two-Step OTP & Registration Lockdown (Stage 8C)**: Public `POST /auth/register` is restricted strictly to `DISPATCHER` (missing role defaults to `DISPATCHER`; `RESOURCE_OPERATOR` or other roles return `403`). Operator login uses 2-step authentication (`POST /auth/login` → 5-minute `OTP_CHALLENGE` token; `POST /auth/verify-otp` → 8-hour `ACCESS` token) with hashed 6-digit `secrets` OTP, max 5 attempts, single-use atomic consumption, and local-only terminal printing (`LOCAL_OTP_CONSOLE=true`).
+- **Completed Incident Archiving (Stage 8D)**: Only `RESOURCE_OPERATOR` can archive `COMPLETED` incidents (`POST /incidents/{id}/archive`), setting `isArchived=True`, `archivedAt`, and `archivedBy` conditionally without changing `status` (`COMPLETED`) or altering timestamps/reservation history. Archived incidents are excluded from Resource Operator active lists and Priority Queue, viewable in `GET /incidents/archived` (newest `archivedAt` first), and preserved in Dispatcher's own reporting history with an `Archived` badge.

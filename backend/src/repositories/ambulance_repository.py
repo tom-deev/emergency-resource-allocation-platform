@@ -1,3 +1,5 @@
+from utils.dynamodb import to_dynamodb_compatible
+
 class AmbulanceRepository:
     """
     Repository for ambulance persistence.
@@ -17,7 +19,7 @@ class AmbulanceRepository:
             "assignedIncidentId": ambulance.assignedIncidentId,
         }
 
-        self.table.put_item(Item=item)
+        self.table.put_item(Item=to_dynamodb_compatible(item))
 
         return item
 
@@ -48,7 +50,7 @@ class AmbulanceRepository:
             Key={"ambulanceId": ambulance_id},
             UpdateExpression="SET " + ", ".join(update_parts),
             ExpressionAttributeNames=expression_names,
-            ExpressionAttributeValues=expression_values,
+            ExpressionAttributeValues=to_dynamodb_compatible(expression_values),
             ReturnValues="ALL_NEW",
         )
 

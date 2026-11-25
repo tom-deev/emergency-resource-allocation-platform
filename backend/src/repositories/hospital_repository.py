@@ -1,3 +1,5 @@
+from utils.dynamodb import to_dynamodb_compatible
+
 class HospitalRepository:
     """
     Repository for hospital persistence.
@@ -18,7 +20,7 @@ class HospitalRepository:
             "status": hospital.status,
         }
 
-        self.table.put_item(Item=item)
+        self.table.put_item(Item=to_dynamodb_compatible(item))
 
         return item
 
@@ -49,7 +51,7 @@ class HospitalRepository:
             Key={"hospitalId": hospital_id},
             UpdateExpression="SET " + ", ".join(update_parts),
             ExpressionAttributeNames=expression_names,
-            ExpressionAttributeValues=expression_values,
+            ExpressionAttributeValues=to_dynamodb_compatible(expression_values),
             ReturnValues="ALL_NEW",
         )
 

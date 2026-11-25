@@ -1,6 +1,16 @@
 import json
 
 import handler
+from utils.auth import create_token
+
+
+DISPATCHER_HEADERS = {
+    "Authorization": "Bearer " + create_token({
+        "userId": "OP001",
+        "username": "operator1",
+        "role": "RESOURCE_OPERATOR",
+    })
+}
 
 
 class FakeAllocationService:
@@ -40,6 +50,7 @@ def test_allocate_route():
         event = {
             "httpMethod": "POST",
             "path": "/incidents/INC001/allocate",
+            "headers": DISPATCHER_HEADERS,
             "body": json.dumps(
                 {
                     "requiredHospitalFacilities": [
@@ -83,6 +94,7 @@ def test_invalid_facilities_body():
         event = {
             "httpMethod": "POST",
             "path": "/incidents/INC001/allocate",
+            "headers": DISPATCHER_HEADERS,
             "body": json.dumps(
                 {
                     "requiredHospitalFacilities": "ICU"
@@ -128,6 +140,7 @@ def test_missing_incident():
         event = {
             "httpMethod": "POST",
             "path": "/incidents/UNKNOWN/allocate",
+            "headers": DISPATCHER_HEADERS,
             "body": json.dumps(
                 {
                     "requiredHospitalFacilities": []

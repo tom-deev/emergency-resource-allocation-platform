@@ -1,0 +1,11 @@
+Method,Name,Error,Occurrences,First Seen,Last Seen
+GET,GET /ambulances,HTTPError('401 Client Error: Unauthorized for url: GET /ambulances'),12,2026-11-25T10:39:16Z,2026-11-25T10:39:22Z
+GET,GET /ambulances,"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",2,2026-11-25T10:39:15Z,2026-11-25T10:39:15Z
+GET,GET /dashboard/summary,"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",1,2026-11-25T10:39:14Z,2026-11-25T10:39:14Z
+GET,GET /hospitals,"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",1,2026-11-25T10:39:14Z,2026-11-25T10:39:14Z
+GET,GET /incidents/queue,CatchResponseError('HTTP 401'),22,2026-11-25T10:39:15Z,2026-11-25T10:39:22Z
+GET,GET /incidents/{id}/candidates,"ConnectionRefusedError(10061, '[WinError 10061] No connection could be made because the target machine actively refused it.')",1,2026-11-25T10:39:14Z,2026-11-25T10:39:14Z
+GET,GET /hospitals,HTTPError('401 Client Error: Unauthorized for url: GET /hospitals'),7,2026-11-25T10:39:15Z,2026-11-25T10:39:22Z
+GET,GET /incidents/queue,CatchResponseError('HTTP 0'),2,2026-11-25T10:39:14Z,2026-11-25T10:39:15Z
+POST,POST /auth/login,CatchResponseError('Login failed with HTTP 0'),8,2026-11-25T10:39:14Z,2026-11-25T10:39:15Z
+GET,GET /dashboard/summary,HTTPError('401 Client Error: Unauthorized for url: GET /dashboard/summary'),15,2026-11-25T10:39:15Z,2026-11-25T10:39:22Z

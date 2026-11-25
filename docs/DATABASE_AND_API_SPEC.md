@@ -1746,3 +1746,104 @@ POST /incidents/{id}/allocate
 This is the baseline API contract for the Minor Project.
 
 Future changes must follow the project's change-control process.
+
+
+---
+
+34. Final Implemented Schema & API Contract (2026-11-25)
+
+This section reflects the exact database schema, item attributes, API routes, permissions, and error handling implemented in the codebase as of 2026-11-25.
+
+34.1 DynamoDB Tables (4 Tables — No 5th Table)
+
+| Table Name | Partition Key | Key Implemented Attributes |
+|---|---|---|
+| `EmergencyUsers` | `userId` (String) | `userId`, `username`, `role` (`DISPATCHER` \| `RESOURCE_OPERATOR`), `passwordHash` (SHA-256 hex; stripped from all responses) |
+| `EmergencyIncidents` | `incidentId` (String) | `incidentId`, `type`, `description`, `latitude`, `longitude`, `severity` (`LOW`\|`MEDIUM`\|`HIGH`\|`CRITICAL`), `priority` (`P1`–`P4`, derived from severity), `peopleAffected`, `status`, `createdAt`, `updatedAt`, `verifiedAt`, `ambulanceAssignedAt`, `hospitalRequestedAt`, `hospitalAcceptedAt`, `hospitalDecisionAt`, `transportedAt`, `completedAt`, `requiredResources`, `requiredEquipment`, `assignedAmbulanceId`, `assignedHospitalId`, `hospitalRequestStatus`, `hospitalRejectionReason`, `reviewedBy`, `reviewedAt`, `verificationRemarks`, `bedReservation` (Map), `reservationHistory` (List, max 20 entries) |
+| `EmergencyAmbulances` | `ambulanceId` (String) | `ambulanceId`, `registrationNumber`, `latitude`, `longitude`, `status` (`AVAILABLE`\|`BUSY`\|`OFFLINE`), `equipment` (List), `assignedIncidentId` |
+| `EmergencyHospitals` | `hospitalId` (String) | `hospitalId`, `name`, `latitude`, `longitude`, `totalBeds`, `availableBeds` (`0 <= availableBeds <= totalBeds`), `facilities` (List), `status` (`ACTIVE`\|`INACTIVE`) |
+
+Note on `bedReservation` Map (embedded in `EmergencyIncidents`):
+- `reservationId`, `incidentId`, `hospitalId`, `bedsReserved` (int >= 1), `status` (`RESERVED` \| `CONFIRMED` \| `REJECTED` \| `RELEASED`), `createdAt`, `updatedAt`, `reason`.
+- `reservationHistory` retains at most the 20 most recent terminal reservation snapshots (`MAX_RESERVATION_HISTORY = 20`).
+
+34.2 Implemented Workflow Status Transitions
+
+```
+CREATED ──(POST /review)──▶ UNDER_REVIEW
+   └──(POST /verify: VERIFIED)──▶ VERIFIED ──(POST /assign-ambulance)──▶ AMBULANCE_ASSIGNED
+   └──(POST /verify: REJECTED)──▶ REJECTED
+
+AMBULANCE_ASSIGNED ──(POST /request-hospital: atomic beds -= N)──▶ HOSPITAL_REQUESTED
+   ├──(POST /hospital-decision: ACCEPTED, no 2nd decrement)──▶ HOSPITAL_ACCEPTED
+   ├──(POST /hospital-decision: REJECTED, atomic beds += N)──▶ HOSPITAL_REJECTED ──(can re-request)──▶ HOSPITAL_REQUESTED
+   └──(POST /cancel-reservation, atomic beds += N)──▶ AMBULANCE_ASSIGNED (ambulance retained)
+
+HOSPITAL_ACCEPTED ──(POST /transport)──▶ PATIENT_TRANSPORTED ──(POST /complete: atomic amb AVAILABLE)──▶ COMPLETED
+```
+
+Direct `PUT /incidents/{id}/status` blocks all protected workflow statuses (`400 Bad Request`).
+
+34.3 Complete Implemented API Route & Permission Matrix
+
+| Method | Path | Allowed Roles | Purpose & Notes |
+|---|---|---|---|
+| `GET` | `/` | Public | Health check (`{"status": "running"}`) |
+| `OPTIONS` | `*` | Public | CORS preflight (`200`) |
+| `POST` | `/auth/register` | Public | Register `username`, `password`, `role` (`201`, strips `passwordHash`) |
+| `POST` | `/auth/login` | Public | Returns `{ message, user, token }` (`200`; invalid creds → `401`) |
+| `GET` | `/auth/me` | Both roles | Returns verified token claims |
+| `GET` | `/dashboard/summary` | Both roles | Live counts, reserved beds, average response time (`null` if insufficient data), `recentActivity` |
+| `POST` | `/incidents` | `DISPATCHER` | Create incident (ignores client timestamps/priority; `201`) |
+| `GET` | `/incidents` | Both roles | Priority-sorted & enriched incident list (`200`) |
+| `GET` | `/incidents/queue` | Both roles | Deterministic priority queue with `?priority=&severity=&status=&date=YYYY-MM-DD&search=` (`200`) |
+| `GET` | `/incidents/{id}` | Both roles | Single enriched incident (`200` / `404`) |
+| `PUT` | `/incidents/{id}/status` | `RESOURCE_OPERATOR` | Non-protected status update (e.g., `CANCELLED`); blocks workflow bypass (`400`) |
+| `POST` | `/incidents/{id}/review` | `RESOURCE_OPERATOR` | `CREATED → UNDER_REVIEW` (`200` / `409`) |
+| `POST` | `/incidents/{id}/verify` | `RESOURCE_OPERATOR` | `UNDER_REVIEW → VERIFIED \| REJECTED` with `decision`, optional `remarks` (`200` / `400` / `409`) |
+| `GET` | `/incidents/{id}/candidates` | `RESOURCE_OPERATOR` | Haversine-ranked ambulances & hospitals (`?facilities=ICU,TRAUMA&beds=N`) |
+| `POST` | `/incidents/{id}/assign-ambulance` | `RESOURCE_OPERATOR` | Atomic ambulance dispatch (`ambulanceId`; `200` / `400` / `404` / `409`) |
+| `POST` | `/incidents/{id}/request-hospital` | `RESOURCE_OPERATOR` | Atomic bed reservation (`hospitalId`, optional `bedsRequested`; `200` / `400` / `404` / `409`) |
+| `POST` | `/incidents/{id}/hospital-decision` | `RESOURCE_OPERATOR` | `decision`: `ACCEPTED` (confirm, no 2nd decrement) or `REJECTED` (atomic bed release; `200` / `400` / `404` / `409`) |
+| `POST` | `/incidents/{id}/cancel-reservation` | `RESOURCE_OPERATOR` | Atomic bed release (`RESERVED → RELEASED`) & return to `AMBULANCE_ASSIGNED` (`200` / `404` / `409`) |
+| `POST` | `/incidents/{id}/transport` | `RESOURCE_OPERATOR` | `HOSPITAL_ACCEPTED → PATIENT_TRANSPORTED` + `transportedAt` (`200` / `404` / `409`) |
+| `POST` | `/incidents/{id}/complete` | `RESOURCE_OPERATOR` | Atomic `PATIENT_TRANSPORTED → COMPLETED` + `completedAt` + ambulance `AVAILABLE` (`200` / `404` / `409`) |
+| `POST` | `/incidents/{id}/allocate` | `RESOURCE_OPERATOR` | Legacy endpoint preserved for backward compatibility (not connected to UI) |
+| `GET` | `/ambulances` | Both roles | List ambulances |
+| `POST` | `/ambulances` | `RESOURCE_OPERATOR` | Register ambulance (`registrationNumber`, coords, `status`, `equipment`; `201`) |
+| `PUT` | `/ambulances/{id}` | `RESOURCE_OPERATOR` | Validated ambulance update (`200` / `400`) |
+| `GET` | `/hospitals` | Both roles | List hospitals |
+| `POST` | `/hospitals` | `RESOURCE_OPERATOR` | Register hospital (`name`, coords, `totalBeds`, `availableBeds`, `facilities`, `status`; `201`) |
+| `PUT` | `/hospitals/{id}` | `RESOURCE_OPERATOR` | Validated hospital update enforcing `0 <= availableBeds <= totalBeds` (`200` / `400`) |
+
+34.4 HTTP Error Codes
+
+- `400`: Validation error, invalid JSON, missing equipment, inactive hospital, invalid bed count, or workflow bypass attempt.
+- `401`: Missing, invalid, or expired Bearer token, or invalid login credentials.
+- `403`: Authenticated user role lacks permission for the route.
+- `404`: Missing incident, ambulance, hospital, or unknown route.
+- `409`: Conditional update failure, concurrent assignment/reservation conflict, insufficient hospital beds, or duplicate release/transition.
+- `500`: Sanitized `"Internal server error."` (stack traces logged server-side only).
+
+
+34.5 Stage 8 Schema & API Contract Updates (2026-11-25)
+
+**Additional `EmergencyUsers` Attributes (OTP Challenge Metadata)**:
+- `otpChallengeId` (String), `otpHash` (String / null after use), `otpExpiresAt` (UTC ISO-8601), `otpAttempts` (Number), `otpMaxAttempts` (Number, default `5`), `otpUsed` (Boolean).
+
+**Additional `EmergencyIncidents` Attributes (Ownership & Archiving)**:
+- `createdBy` (String — verified `userId`, backend-stamped; `None` for legacy records)
+- `createdByUsername` (String — verified `username`)
+- `isArchived` (Boolean, default `False`)
+- `archivedAt` (UTC ISO-8601, backend-generated)
+- `archivedBy` (String — verified operator `userId`)
+
+**Updated & New Endpoint Permissions**:
+- `POST /auth/register`: Public, **`DISPATCHER` only** (missing role defaults to `DISPATCHER`; `RESOURCE_OPERATOR` or other roles → `403`).
+- `POST /auth/login`: `DISPATCHER` → immediate `ACCESS` token; `RESOURCE_OPERATOR` → `{ otpRequired: true, challengeToken, expiresInSeconds: 300, user }` (`503` if `LOCAL_OTP_CONSOLE != "true"`).
+- `POST /auth/verify-otp`: Public (requires valid `OTP_CHALLENGE` `challengeToken` + 6-digit `otp`) → returns 8-hour `ACCESS` token (`401` on invalid/expired/reused/locked-out OTP).
+- `GET /incidents`: `DISPATCHER` receives own incidents only (including own archived, sanitized to 13 safe fields); `RESOURCE_OPERATOR` receives all non-archived incidents.
+- `GET /incidents/{id}`: `DISPATCHER` receives own incident sanitized, or **`404`** for other/legacy incidents; `RESOURCE_OPERATOR` receives full operational record.
+- `GET /incidents/queue`, `GET /dashboard/summary`, `GET /ambulances`, `GET /hospitals`: **`RESOURCE_OPERATOR` only** (`403` for `DISPATCHER`).
+- `GET /incidents/archived`: **`RESOURCE_OPERATOR` only** (`403` for `DISPATCHER`); returns archived incidents sorted by `archivedAt` descending.
+- `POST /incidents/{id}/archive`: **`RESOURCE_OPERATOR` only** (`403` for `DISPATCHER`); conditionally archives `COMPLETED` non-archived incidents (`404` missing, `409` incomplete or already archived) without changing `status`.

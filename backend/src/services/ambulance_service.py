@@ -1,3 +1,4 @@
+from dataclasses import asdict, is_dataclass
 from validation.ambulance import validate_ambulance_data
 from constants import AMBULANCE_STATUSES
 
@@ -14,7 +15,8 @@ class AmbulanceService:
         """
         Validate and create an ambulance.
         """
-        validate_ambulance_data(ambulance)
+        ambulance_data = asdict(ambulance) if is_dataclass(ambulance) else ambulance
+        validate_ambulance_data(ambulance_data)
         return self.ambulance_repository.create(ambulance)
 
     def get_ambulance(self, ambulance_id):
@@ -45,10 +47,34 @@ class AmbulanceService:
 
     def update_ambulance(self, ambulance_id, data):
         """
-        Update ambulance information.
+        Validate and update ambulance information.
         """
-        if not data:
+        if not data or not isinstance(data, dict):
             raise ValueError("Update data cannot be empty.")
+
+        if "ambulanceId" in data:
+            raise ValueError("ambulanceId cannot be modified.")
+
+        if "registrationNumber" in data:
+            reg = data["registrationNumber"]
+            if not isinstance(reg, str) or not reg.strip():
+                raise ValueError("registrationNumber must be a non-empty string")
+
+        if "status" in data and data["status"] not in AMBULANCE_STATUSES:
+            raise ValueError(f"Invalid ambulance status: {data['status']}")
+
+        if "latitude" in data:
+            lat = data["latitude"]
+            if isinstance(lat, bool) or not isinstance(lat, (int, float)) or not -90 <= lat <= 90:
+                raise ValueError("latitude must be between -90 and 90")
+
+        if "longitude" in data:
+            lon = data["longitude"]
+            if isinstance(lon, bool) or not isinstance(lon, (int, float)) or not -180 <= lon <= 180:
+                raise ValueError("longitude must be between -180 and 180")
+
+        if "equipment" in data and not isinstance(data["equipment"], list):
+            raise ValueError("equipment must be a list")
 
         return self.ambulance_repository.update(
             ambulance_id,

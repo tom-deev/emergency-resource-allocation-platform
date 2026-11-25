@@ -495,3 +495,92 @@ The four project documents have different purposes:
 These documents should remain consistent with one another.
 
 `DEVELOPMENT_LOG.md` should record implementation reality rather than becoming another planning document.
+
+
+---
+
+2026-11-25 --- Backend Cleanup, Auth, Manual Workflow & React Dashboard (Local Verification)
+
+Objective
+
+Clean up critical backend handler issues, implement lightweight HMAC token authentication and role-based access control for the two approved roles (DISPATCHER, RESOURCE_OPERATOR), implement the complete human-controlled incident coordination workflow, build the React Emergency Operations Dashboard, and verify the complete application locally before AWS deployment.
+
+Work Completed
+
+- Removed duplicate imports, duplicate service factories, and duplicate route blocks from `backend/src/handler.py`.
+- Added CORS headers and `OPTIONS` preflight support in `backend/src/utils/response.py` and `backend/src/handler.py`.
+- Removed temporary diagnostic `describe_table()` calls from `backend/src/services/allocation_service.py`.
+- Added field and capacity validation (`0 <= availableBeds <= totalBeds`) to `AmbulanceService.update_ambulance` and `HospitalService.update_hospital`.
+- Restricted `IncidentService.update_status` so protected workflow states cannot bypass incident verification.
+- Implemented lightweight HMAC-SHA256 bearer token authentication with expiry and environment-variable secret (`AUTH_TOKEN_SECRET`) in `backend/src/utils/auth.py`.
+- Implemented `CoordinationService` (`backend/src/services/coordination_service.py`) for Haversine candidate ranking, atomic manual ambulance assignment, hospital admission requests, explicit hospital accept/reject decisions (atomic bed decrement only on accept), patient transport, and incident completion (releasing the ambulance back to AVAILABLE).
+- Wired all verification and manual coordination routes into `backend/src/handler.py` with proper HTTP status codes (`200`, `201`, `400`, `401`, `403`, `404`, `409`, `500`).
+- Created `backend/local_server.py` (in-memory mock DynamoDB HTTP bridge to `handler.lambda_handler`) strictly for local testing and demo.
+- Updated `backend/src/run_all_tests.py` to execute all 20 backend test suites, including new `backend/src/test_workflow_and_auth.py`.
+- Built the complete React + Vite Emergency Operations Dashboard in `frontend/src/` (`AuthPage`, `DashboardView`, `IncidentsView`, `CoordinationView`, `AmbulancesView`, `HospitalsView`, centralized `api/client.js`, and `frontend/.env.example`).
+
+Verification
+
+- Backend unit & mock-based workflow test runner (`backend/src/run_all_tests.py`): **20/20 test suites PASSED** (all mock/in-memory; live AWS DynamoDB not yet tested).
+- Local HTTP server smoke test against `backend/local_server.py`: PASSED (`GET /`, `POST /auth/login`, `GET /incidents`, `GET /ambulances`, `GET /hospitals`).
+- Frontend lint (`npm run lint`) and production build (`npm run build`): verified in `frontend/`.
+
+Status
+
+LOCAL APPLICATION COMPLETE — READY FOR PHASE 5 STEP-BY-STEP AWS VERIFICATION (`ap-south-1`).
+
+
+---
+
+2026-11-25 --- Stages 1–7: Maps, Priority Queue, Role Reassignment, Atomic Dispatch, Bed Reservation, Dashboard, Locust & Documentation
+
+Objective
+
+Extend the verified local Minor Project with Leaflet/OpenStreetMap mapping and Google Maps external navigation, authoritative UTC timestamps and deterministic P1–P4 priority queue (IST display), reconciled two-role permissions, atomic ambulance dispatch with suitability checks, atomic multi-bed hospital reservation with duplicate-safe release and bounded history, expanded live dashboard metrics, isolated Locust local load testing, and synchronized project documentation.
+
+Work Completed
+
+- **Maps & External Navigation**: Installed `leaflet@^1.9.4` and `react-leaflet@^5.0.0` in `frontend/`. Added `frontend/src/utils/maps.js`, `MapHelpers.jsx`, `LocationPickerMap.jsx` (click-to-select, draggable marker, Browser Geolocation API, manual coordinate sync, Pune default center), `IncidentLocationMap.jsx`, `CoordinationMap.jsx` (color-coded Incident/Available Ambulance/Assigned Ambulance/Hospital markers), and external Google Maps driving directions buttons ("Navigate to Incident" and "Navigate to Hospital").
+- **Stage 1 (Timestamps & Priority Queue)**: Updated `constants.py`, `models/incident.py`, `incident_repository.py`, `incident_service.py`, `handler.py`, `frontend/src/utils/time.js`, and `PriorityQueueView.jsx`. Backend generates all authoritative UTC ISO-8601 timestamps and derives `P1–P4` from severity; `GET /incidents/queue` provides deterministic sorting (`P1→P4`, oldest `createdAt` first), IST date filtering, and configurable waiting thresholds (`5m/15m/30m/60m`). Added `test_priority_queue.py`.
+- **Stage 2 (Roles & Inspection)**: Enforced reconciled two-role RBAC in `handler.py` (`DISPATCHER` reports incidents & monitors; `RESOURCE_OPERATOR` inspects, verifies/rejects, dispatches, reserves beds, records transport & completes). Updated `IncidentsView.jsx`, `CoordinationView.jsx`, `AuthPage.jsx`, and `test_workflow_and_auth.py`.
+- **Stage 3 (Atomic Ambulance Dispatch)**: Enforced required equipment suitability, valid coordinates, unassigned status, backend `ambulanceAssignedAt`, and atomic 2-item DynamoDB transaction in `coordination_service.py`. Added 5 multi-threaded concurrency scenarios in `test_ambulance_dispatch.py`.
+- **Stage 4 (Hospital Bed Reservation)**: Implemented embedded `bedReservation` (`RESERVED`/`CONFIRMED`/`REJECTED`/`RELEASED`) and bounded `reservationHistory` (capped at `MAX_RESERVATION_HISTORY = 20`) inside `EmergencyIncidents` (preserving 4 DynamoDB tables). Added atomic reservation (`default = peopleAffected`, adjustable), confirm without second decrement, atomic duplicate-safe release on rejection or `POST /incidents/{id}/cancel-reservation`, and `test_hospital_reservation.py`.
+- **Stage 5 (Transport, Completion & Dashboard)**: Recorded backend `transportedAt` and `completedAt`, atomic ambulance release on completion (preserving hospital reservation and bed count), `GET /dashboard/summary` with live KPIs, `averageResponseTimeSeconds` (`"Unavailable"` when insufficient data), and IST activity timeline. Added "Navigate to Hospital" and `test_transport_completion_dashboard.py`.
+- **Stage 6 (Locust Load Testing)**: Installed `locust==2.47.0` in `backend/.venv` only (excluded from Lambda `requirements.txt`). Created `backend/load_tests/` (`locustfile.py`, `config.example.env`, `README.md`, `PERFORMANCE_REPORT.md`) and executed progressive local mock-server tests (10, 25, 50, 100, 200 concurrent users; 6,040 total requests, 0 HTTP 500 errors, 2.78% failure rate at 200 users due to Windows `ThreadingHTTPServer` TCP backlog `10061` + resulting `401` on unauthenticated retries).
+- **Stage 7 (Documentation)**: Synchronized `README.md`, `docs/PROJECT_MASTER_SPEC.md`, `docs/ARCHITECTURE.md`, `docs/DATABASE_AND_API_SPEC.md`, and `docs/DEVELOPMENT_LOG.md`.
+
+Verification
+
+- Backend test suite (`.\backend\.venv\Scripts\python.exe backend\src\run_all_tests.py`): **24 / 24 test suites PASSED** (all unit/mock/in-memory; live AWS DynamoDB not yet verified).
+- Frontend lint (`npm run lint`) and production build (`npm run build`): **PASSED**.
+- Local HTTP smoke tests against `backend/local_server.py`: **PASSED**.
+- Locust progressive load tests (10 → 200 users) against `backend/local_server.py`: **COMPLETED** (CSVs saved in `backend/load_tests/results/`).
+
+Status
+
+LOCAL MINOR PROJECT COMPLETE AND VERIFIED — READY FOR STEP-BY-STEP AWS DEPLOYMENT & LIVE VERIFICATION (`ap-south-1`).
+
+
+---
+
+2026-11-25 --- Stages 8A–8D: Ownership & Privacy, Operator Two-Step OTP, Registration Lockdown & Completed Incident Archiving
+
+Objective
+
+Harden authentication and data privacy for the two-role model (Dispatcher ownership isolation, Resource Operator two-step OTP, public registration lockdown) and add completed incident archiving with a dedicated archived-incidents view.
+
+Work Completed
+
+- **Stage 8B (Ownership & Privacy)**: Added backend-stamped `createdBy`/`createdByUsername`, Dispatcher response sanitizer (`_sanitize_incident_for_dispatcher`), `404` hiding for cross-user/legacy incidents, `RESOURCE_OPERATOR`-only restriction (`403` for Dispatchers) on `/incidents/queue`, `/dashboard/summary`, `/ambulances`, `/hospitals`, role-isolated Dispatcher UI (**My Reported Incidents**), and `test_ownership_and_privacy.py`.
+- **Stage 8C (Operator OTP & Registration Lockdown)**: Added `ACCESS` vs `OTP_CHALLENGE` token purposes in `utils/auth.py`, atomic conditional OTP methods on `UserRepository`, 6-digit `secrets` OTP + 5-min expiry + 5-attempt lockout + single-use consumption in `UserService`, `POST /auth/verify-otp`, `LOCAL_OTP_CONSOLE=true` terminal delivery in `local_server.py`, public `POST /auth/register` lockdown (`DISPATCHER` only, `403` for `RESOURCE_OPERATOR`), two-step OTP UI in `AuthPage.jsx`, and `test_operator_otp_auth.py`.
+- **Stage 8D (Completed Incident Archiving & Docs Sync)**: Added `isArchived`, `archivedAt`, `archivedBy` on `EmergencyIncidents`, atomic conditional `POST /incidents/{id}/archive` (only `COMPLETED`, status preserved), `GET /incidents/archived` (newest first, operator-only), excluded archived items from operator active list & priority queue while keeping Dispatcher's own archived items visible with an `ARCHIVED` badge, added `ArchivedIncidentsView.jsx`, updated `locustfile.py` for Stage 8 role permissions, added `test_incident_archiving.py`, and synchronized all project docs.
+
+Verification
+
+- Backend test suite (`backend/src/run_all_tests.py`): **27 / 27 test suites PASSED** (local mock/in-memory; live AWS not yet verified).
+- Frontend lint (`npm run lint`) and production build (`npm run build`): **PASSED**.
+- Local HTTP smoke tests (Dispatcher ownership, Operator 2-step OTP, archiving & archived list): **PASSED**.
+
+Status
+
+LOCAL MINOR PROJECT COMPLETE WITH STAGE 8 SECURITY & ARCHIVING — READY FOR PHASE 5 AWS DEPLOYMENT (`ap-south-1`).

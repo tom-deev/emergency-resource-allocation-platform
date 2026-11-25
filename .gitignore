@@ -34,3 +34,15 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# AWS Lambda deployment artifacts (generated locally)
+backend/lambda-deploy-current/
+backend/lambda-package/
+backend/zip_verify_temp/
+backend/*.zip
+
+# Python backup files
+*.bak
+
+# Local test and development artifacts
+backend/__pycache__/
